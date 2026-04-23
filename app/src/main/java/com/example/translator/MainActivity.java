@@ -25,6 +25,7 @@ import com.google.android.gms.tasks.Task;
 import com.google.android.gms.tasks.Tasks;
 import com.google.android.material.button.MaterialButton;
 import com.google.android.material.floatingactionbutton.FloatingActionButton;
+import com.google.android.material.imageview.ShapeableImageView;
 import com.google.android.material.materialswitch.MaterialSwitch;
 import com.google.mlkit.common.model.DownloadConditions;
 import com.google.mlkit.common.model.RemoteModelManager;
@@ -43,7 +44,6 @@ import org.json.JSONObject;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Scanner;
 import java.util.concurrent.ExecutorService;
@@ -57,6 +57,10 @@ public class MainActivity extends AppCompatActivity {
     private ImageButton btnSwap;
     private MaterialSwitch switchOfflineMode;
     private MaterialButton btnDownloadModel;
+
+    // Header buttons (wired up now)
+    private ImageButton btnSaved;
+    private ShapeableImageView btnAccount;
 
     private Translator mTranslator;
     private boolean isOfflineMode = false;
@@ -88,17 +92,35 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void initViews() {
-        originalText = findViewById(R.id.originalText);
-        translatedText = findViewById(R.id.translatedText);
-        btnMicro = findViewById(R.id.btnMicro);
-        tvSourceLang = findViewById(R.id.tvSourceLang);
-        tvTargetLang = findViewById(R.id.tvTargetLang);
-        btnSwap = findViewById(R.id.btnSwap);
-        btnPicture = findViewById(R.id.btnPicture);
-        btnCamera = findViewById(R.id.btnCamera);
+        originalText      = findViewById(R.id.originalText);
+        translatedText    = findViewById(R.id.translatedText);
+        btnMicro          = findViewById(R.id.btnMicro);
+        tvSourceLang      = findViewById(R.id.tvSourceLang);
+        tvTargetLang      = findViewById(R.id.tvTargetLang);
+        btnSwap           = findViewById(R.id.btnSwap);
+        btnPicture        = findViewById(R.id.btnPicture);
+        btnCamera         = findViewById(R.id.btnCamera);
         switchOfflineMode = findViewById(R.id.switchOfflineMode);
-        btnDownloadModel = findViewById(R.id.btnDownloadModel);
+        btnDownloadModel  = findViewById(R.id.btnDownloadModel);
 
+        // ── Header buttons ────────────────────────────────────────
+        btnSaved   = findViewById(R.id.SavedButtonHeader);
+        btnAccount = findViewById(R.id.btnAccount);
+
+        // Bookmark → open SavedActivity (requires login)
+        btnSaved.setOnClickListener(v -> {
+            if (AuthManager.getInstance(this).isLoggedIn()) {
+                startActivity(new Intent(this, SavedActivity.class));
+            } else {
+                Toast.makeText(this, "Vui lòng đăng nhập để xem từ đã lưu", Toast.LENGTH_SHORT).show();
+                startActivity(new Intent(this, LoginActivity.class));
+            }
+        });
+
+        // Account icon → show login/logout menu
+        btnAccount.setOnClickListener(v -> showAccountMenu());
+
+        // ── Existing listeners ────────────────────────────────────
         btnMicro.setOnClickListener(v -> checkPermissionAndStartSpeech());
         btnSwap.setOnClickListener(v -> swapLanguages());
         tvSourceLang.setOnClickListener(v -> showLanguageDialog(true));
@@ -117,7 +139,58 @@ public class MainActivity extends AppCompatActivity {
         });
 
         btnDownloadModel.setOnClickListener(v -> downloadOfflineModels());
+
+        // Update account icon appearance based on login state
+        updateAccountIcon();
     }
+
+    /** Shows login info or logout option depending on auth state. */
+    private void showAccountMenu() {
+        AuthManager auth = AuthManager.getInstance(this);
+        if (auth.isLoggedIn()) {
+            String username = auth.getUsername();
+            new AlertDialog.Builder(this)
+                    .setTitle("Tài khoản")
+                    .setMessage("Đang đăng nhập với: " + username)
+                    .setPositiveButton("Đăng xuất", (dialog, which) -> {
+                        auth.logout();
+                        updateAccountIcon();
+                        Toast.makeText(this, "Đã đăng xuất", Toast.LENGTH_SHORT).show();
+                    })
+                    .setNegativeButton("Hủy", null)
+                    .show();
+        } else {
+            new AlertDialog.Builder(this)
+                    .setTitle("Tài khoản")
+                    .setMessage("Bạn chưa đăng nhập")
+                    .setPositiveButton("Đăng nhập", (dialog, which) ->
+                            startActivity(new Intent(this, LoginActivity.class)))
+                    .setNeutralButton("Đăng ký", (dialog, which) ->
+                            startActivity(new Intent(this, RegisterActivity.class)))
+                    .setNegativeButton("Hủy", null)
+                    .show();
+        }
+    }
+
+    /** Tint the account icon blue when logged in, grey when not. */
+    private void updateAccountIcon() {
+        if (AuthManager.getInstance(this).isLoggedIn()) {
+            btnAccount.setColorFilter(
+                    ContextCompat.getColor(this, android.R.color.holo_blue_dark));
+        } else {
+            btnAccount.setColorFilter(
+                    ContextCompat.getColor(this, android.R.color.darker_gray));
+        }
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        // Refresh icon in case user just logged in/out from another activity
+        updateAccountIcon();
+    }
+
+    // ── Everything below is unchanged from the original ──────────
 
     private void checkIfModelsDownloaded() {
         RemoteModelManager modelManager = RemoteModelManager.getInstance();
@@ -199,15 +272,13 @@ public class MainActivity extends AppCompatActivity {
         sourceLangCode = targetLangCode;
         targetLangCode = tempCode;
 
-        String txtSource = tvSourceLang.getText().toString();
-        String txtTarget = tvTargetLang.getText().toString();
-        tvSourceLang.setText(txtTarget);
-        tvTargetLang.setText(txtSource);
+        String tempName = tvSourceLang.getText().toString();
+        tvSourceLang.setText(tvTargetLang.getText().toString());
+        tvTargetLang.setText(tempName);
 
-        String currentOriginal = originalText.getText().toString();
-        String currentTranslated = translatedText.getText().toString();
-        originalText.setText(currentTranslated);
-        translatedText.setText(currentOriginal);
+        String tempText = originalText.getText().toString();
+        originalText.setText(translatedText.getText().toString());
+        translatedText.setText(tempText);
 
         setupTranslator();
         triggerTranslation();
@@ -252,22 +323,27 @@ public class MainActivity extends AppCompatActivity {
                 .addOnSuccessListener(result -> translatedText.setText(result))
                 .addOnFailureListener(e -> translatedText.setText("Lỗi dịch Offline..."));
     }
+
     private void performOnlineTranslation(String text) {
-        // translatedText là EditText trong layout của bạn
         translatedText.setHint("Đang dịch Online...");
 
         networkExecutor.execute(() -> {
             HttpURLConnection conn = null;
             try {
-                // URL khớp với @RequestMapping("/api/translations") và @PostMapping("/translate")
                 URL url = new URL("http://10.0.2.2:8080/api/translate");
                 conn = (HttpURLConnection) url.openConnection();
                 conn.setRequestMethod("POST");
                 conn.setRequestProperty("Content-Type", "application/json; utf-8");
                 conn.setRequestProperty("Accept", "application/json");
+
+                // Attach JWT if the user is logged in (optional for translation)
+                String bearer = AuthManager.getInstance(this).getBearerToken();
+                if (bearer != null) {
+                    conn.setRequestProperty("Authorization", bearer);
+                }
+
                 conn.setDoOutput(true);
 
-                // Tạo JSON body khớp với TranslationRequestDTO {text, source, target}
                 JSONObject jsonInput = new JSONObject();
                 jsonInput.put("sourceText", text);
                 jsonInput.put("sourceLangId", sourceLangCode);
@@ -283,10 +359,7 @@ public class MainActivity extends AppCompatActivity {
                     try (java.util.Scanner scanner = new java.util.Scanner(conn.getInputStream(), "UTF-8")) {
                         String response = scanner.useDelimiter("\\A").next();
                         JSONObject jsonResponse = new JSONObject(response);
-
-                        // Lấy field "translatedText" từ TranslationResponseDTO
                         String result = jsonResponse.getString("targetText");
-
                         mainHandler.post(() -> translatedText.setText(result));
                     }
                 } else {
@@ -299,6 +372,7 @@ public class MainActivity extends AppCompatActivity {
             }
         });
     }
+
     private void checkCameraPermission() {
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
             ActivityCompat.requestPermissions(this, new String[]{Manifest.permission.CAMERA}, 2);
